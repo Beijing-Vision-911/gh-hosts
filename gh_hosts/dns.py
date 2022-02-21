@@ -2,46 +2,15 @@ import asyncio
 import os
 import re
 import sys
-from concurrent.futures import ThreadPoolExecutor
-from urllib.request import urlopen
 
+import aiohttp
 from ping3 import ping
 
-pattern = re.compile(
+single_ip_text = re.compile(
     r'<th>IP Addresse?s?</th><td><ul class="comma-separated"><li>(.+?)</li>'
 )
-pattern2 = re.compile(r"addresses:<ul>(.+?)</ul>")
-pattern3 = re.compile(r"<strong>(.+?)</strong>")
-
-
-def lowest_delay_ip(ip_lst):
-    lst = []
-    for i in ip_lst:
-        ip = ping(i)
-        if isinstance(ip, float):
-            lst.append(ip)
-    return ip_lst[lst.index(min(lst))]
-
-
-def url_lookup_transform(url: str):
-    return f"https://ipaddress.com/website/{url}"
-
-
-def ip_lookup(url):
-    lookup_url = url_lookup_transform(url)
-    req = urlopen(lookup_url).read().decode()
-    ip = re.findall(pattern, req)
-    if ip:
-        return {url: ip[0]}
-    # if multi ip address is acquared, ping each ip and select ip with best latency.
-    try:
-        test = re.findall(pattern2, req)[0]
-        ip = re.findall(pattern3, test)
-        ips = lowest_delay_ip(ip)
-        return {url: ips}
-    except:
-        print(url)
-        return
+multiple_ip_text1 = re.compile(r"addresses:<ul>(.+?)</ul>")
+multiple_ip_text2 = re.compile(r"<strong>(.+?)</strong>")
 
 
 domains = [
@@ -85,14 +54,42 @@ domains = [
 ]
 
 
-async def start():
-    loop = asyncio.get_event_loop()
-    with ThreadPoolExecutor() as pool:
-        futures = [loop.run_in_executor(pool, ip_lookup, url) for url in domains]
-        reqs = await asyncio.gather(*futures)
+async def lowest_delay_ip(ip):
+    lowest_delay = ping(ip)
+    if type(lowest_delay) == float:
+        return lowest_delay
+    return 99
+
+
+async def url_lookup_transform(session, url):
+    async with session.get(url) as response:
+        r = await response.text()
+        ip = re.findall(single_ip_text, str(r))
+        url = url.split("/")[-1]
+        if ip:
+            return {url: ip[0]}
+        # if multi ip address is acquared, ping each ip and select ip with best latency.
+        try:
+            html = re.findall(multiple_ip_text1, str(r))[0]
+            ips = re.findall(multiple_ip_text2, html)
+            lowest_delay = await asyncio.gather(*[lowest_delay_ip(ip) for ip in ips])
+            ip = ips[lowest_delay.index(min(lowest_delay))]
+            return {url: ip}
+        except:
+            return
+
+
+async def ip_lookup():
     dist = {}
-    for s in reqs:
-        dist.update(s)
+    async with aiohttp.ClientSession() as session:
+        r = await asyncio.gather(
+            *[
+                url_lookup_transform(session, f"https://ipaddress.com/website/{url}")
+                for url in domains
+            ]
+        )
+    for vlaue in r:
+        dist.update(vlaue)
 
     hosts = ""
 
@@ -108,10 +105,7 @@ async def start():
 
 
 def main():
-    try:
-        asyncio.run(start())
-    except asyncio.exceptions.CancelledError:
-        sys.exit(0)
+    asyncio.run(ip_lookup())
 
 
 if __name__ == "__main__":
