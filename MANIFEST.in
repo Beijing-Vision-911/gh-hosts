@@ -1,0 +1,2 @@
+include versioneer.py
+include gh_hosts/_version.py

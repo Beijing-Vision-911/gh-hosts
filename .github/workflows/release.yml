@@ -1,0 +1,46 @@
+# automatic tag release
+
+name: tagged release
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  tagged-release:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+
+      - name: setup python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.8'
+
+      - name: install build deps
+        run: |
+          sudo apt install clang
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: build wheel
+        run: python -m build -w
+
+      - name: relsease
+        uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: false
+          files: |
+            dist/*.whl
+
+      - name: publish on private pipy
+        uses: "pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29"
+        with:
+          user: vision
+          password: user
+          repository_url: http://152.136.100.152:8080
